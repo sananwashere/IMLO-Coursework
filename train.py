@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
-from model import PetCNN
+from model import PetResidualCNN
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -13,8 +13,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IMAGE_SIZE = 160
 BATCH_SIZE = 32
 EPOCHS = 30
-LEARNING_RATE = 1e-3
-MODEL_PATH = "pet_model.pth"
+MODEL_PATH = "model.pth"
 
 torch.manual_seed(42)
 torch.cuda.manual_seed_all(42)
@@ -44,28 +43,32 @@ def main():
     print("Using device:", DEVICE)
 
     train_transform = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.Resize((IMAGE_SIZE + 20, IMAGE_SIZE + 20)),
+        transforms.RandomCrop(IMAGE_SIZE),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
+        transforms.RandomRotation(20),
         transforms.ColorJitter(
-            brightness=0.1,
-            contrast=0.1,
-            saturation=0.1
+            brightness=0.3,
+            contrast=0.3,
+            saturation=0.3,
+            hue=0.1
         ),
+        transforms.RandomGrayscale(p=0.1),
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=[0.5, 0.5, 0.5],
-            std=[0.5, 0.5, 0.5]
-        )
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        ),
+        transforms.RandomErasing(p=0.3),
     ])
 
     val_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=[0.5, 0.5, 0.5],
-            std=[0.5, 0.5, 0.5]
-        )
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        ),
     ])
 
     full_train_dataset = datasets.OxfordIIITPet(
@@ -103,7 +106,7 @@ def main():
         train_dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=0,
+        num_workers=4,
         pin_memory=True
     )
 
@@ -111,23 +114,25 @@ def main():
         val_dataset,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        num_workers=0,
+        num_workers=4,
         pin_memory=True
     )
 
-    model = PetCNN().to(DEVICE)
+    model = PetResidualCNN(num_classes=37).to(DEVICE)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     optimizer = optim.Adam(
         model.parameters(),
-        lr=LEARNING_RATE,
+        lr=1e-3,
         weight_decay=1e-4
     )
 
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer,
-        T_max=EPOCHS
+        max_lr=1e-3,
+        epochs=EPOCHS,
+        steps_per_epoch=len(train_loader)
     )
 
     best_val_acc = 0.0
@@ -150,6 +155,7 @@ def main():
 
             loss.backward()
             optimizer.step()
+            scheduler.step()
 
             running_loss += loss.item()
 
@@ -157,8 +163,6 @@ def main():
 
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-
-        scheduler.step()
 
         train_loss = running_loss / len(train_loader)
         train_acc = 100 * correct / total
