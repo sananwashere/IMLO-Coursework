@@ -8,7 +8,7 @@ from model import PetResidualCNN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-IMAGE_SIZE = 160
+IMAGE_SIZE = 224
 BATCH_SIZE = 32
 MODEL_PATH = "model.pth"
 TTA_STEPS = 5
@@ -17,6 +17,7 @@ TTA_STEPS = 5
 def main():
     print("Using device:", DEVICE)
 
+    # Basic test preprocessing
     test_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor(),
@@ -26,6 +27,7 @@ def main():
         ),
     ])
 
+    # Test time augmentation
     tta_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(),
         transforms.RandomCrop(IMAGE_SIZE, padding=20),
@@ -62,6 +64,7 @@ def main():
         for images, labels in test_loader:
             labels = labels.to(DEVICE)
 
+            # Average predictions
             preds = torch.stack([
                 model(tta_transform(images).to(DEVICE))
                 for _ in range(TTA_STEPS)

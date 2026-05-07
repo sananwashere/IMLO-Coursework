@@ -31,6 +31,7 @@ class ResidualBlock(nn.Module):
 
         self.shortcut = nn.Sequential()
 
+        # Match dimensions
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(
@@ -53,6 +54,7 @@ class ResidualBlock(nn.Module):
         out = self.conv2(out)
         out = self.bn2(out)
 
+        # Add residual connection
         out = out + identity
         out = self.relu(out)
 
@@ -83,6 +85,7 @@ class PetResidualCNN(nn.Module):
             padding=1
         )
 
+        # Four residual stages
         self.layer1 = self._make_layer(64, 2, stride=1)
         self.layer2 = self._make_layer(128, 2, stride=2)
         self.layer3 = self._make_layer(256, 2, stride=2)

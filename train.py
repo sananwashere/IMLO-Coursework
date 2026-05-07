@@ -10,7 +10,7 @@ from model import PetResidualCNN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-IMAGE_SIZE = 160
+IMAGE_SIZE = 224
 BATCH_SIZE = 32
 EPOCHS = 30
 MODEL_PATH = "model.pth"
@@ -42,15 +42,16 @@ def calculate_accuracy(model, loader):
 def main():
     print("Using device:", DEVICE)
 
+    # Training transforms with augmentation
     train_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE + 20, IMAGE_SIZE + 20)),
         transforms.RandomCrop(IMAGE_SIZE),
-        transforms.RandomHorizontalFlip(),
+        #transforms.RandomHorizontalFlip(),
         transforms.RandomRotation(20),
         transforms.ColorJitter(
-            brightness=0.3,
-            contrast=0.3,
-            saturation=0.3,
+            brightness=0.15,
+            contrast=0.15,
+            saturation=0.15,
             hue=0.1
         ),
         transforms.RandomGrayscale(p=0.1),
@@ -61,6 +62,7 @@ def main():
         ),
         transforms.RandomErasing(p=0.3),
     ])
+
 
     val_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -86,6 +88,7 @@ def main():
         download=True,
         transform=val_transform
     )
+
 
     generator = torch.Generator().manual_seed(42)
 
@@ -137,6 +140,7 @@ def main():
 
     best_val_acc = 0.0
 
+    # Main training loop
     for epoch in range(EPOCHS):
         model.train()
 
@@ -175,6 +179,7 @@ def main():
             f"Val Acc: {val_acc:.2f}%"
         )
 
+        # Save best validation model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
 
