@@ -31,7 +31,7 @@ class ResidualBlock(nn.Module):
 
         self.shortcut = nn.Sequential()
 
-        # Match dimensions
+        # Match dimensions if the input and output sizes are different
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(
@@ -54,7 +54,7 @@ class ResidualBlock(nn.Module):
         out = self.conv2(out)
         out = self.bn2(out)
 
-        # Add residual connection
+        # Residual connection
         out = out + identity
         out = self.relu(out)
 
@@ -93,6 +93,8 @@ class PetResidualCNN(nn.Module):
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
+        # Dropout before final classifier
+        self.dropout = nn.Dropout(0.2)
         self.fc = nn.Linear(512, num_classes)
 
     def _make_layer(self, out_channels, num_blocks, stride):
@@ -135,6 +137,7 @@ class PetResidualCNN(nn.Module):
 
         x = torch.flatten(x, 1)
 
+        x = self.dropout(x)
         x = self.fc(x)
 
         return x
