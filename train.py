@@ -13,7 +13,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IMAGE_SIZE = 160
 BATCH_SIZE = 32
 EPOCHS = 30
-LEARNING_RATE = 2e-3
+LEARNING_RATE = 1e-3
 MODEL_PATH = "pet_model.pth"
 
 torch.manual_seed(42)
@@ -46,11 +46,11 @@ def main():
     train_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(15),
+        transforms.RandomRotation(10),
         transforms.ColorJitter(
-            brightness=0.2,
-            contrast=0.2,
-            saturation=0.2
+            brightness=0.1,
+            contrast=0.1,
+            saturation=0.1
         ),
         transforms.ToTensor(),
         transforms.Normalize(
@@ -146,11 +146,9 @@ def main():
             optimizer.zero_grad()
 
             outputs = model(images)
-
             loss = criterion(outputs, labels)
 
             loss.backward()
-
             optimizer.step()
 
             running_loss += loss.item()
@@ -158,7 +156,6 @@ def main():
             _, predicted = torch.max(outputs, 1)
 
             total += labels.size(0)
-
             correct += (predicted == labels).sum().item()
 
         scheduler.step()

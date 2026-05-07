@@ -4,14 +4,14 @@ import numpy as np
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from model import PetCNN
+from model import PetResidualCNN
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 IMAGE_SIZE = 160
 BATCH_SIZE = 32
-MODEL_PATH = "pet_model.pth"
+MODEL_PATH = "model.pth"
 
 
 def main():
@@ -21,8 +21,8 @@ def main():
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=[0.5, 0.5, 0.5],
-            std=[0.5, 0.5, 0.5]
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
         )
     ])
 
@@ -45,7 +45,7 @@ def main():
     class_names = test_dataset.classes
     num_classes = len(class_names)
 
-    model = PetCNN().to(DEVICE)
+    model = PetResidualCNN(num_classes=37).to(DEVICE)
 
     model.load_state_dict(
         torch.load(MODEL_PATH, map_location=DEVICE)
@@ -74,7 +74,6 @@ def main():
                 predicted_label = predicted_label.item()
 
                 total_per_class[true_label] += 1
-
                 confusion_matrix[true_label][predicted_label] += 1
 
                 if true_label == predicted_label:

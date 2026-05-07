@@ -33,7 +33,7 @@ class PetCNN(nn.Module):
 
             nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.2),
 
             nn.Linear(256, num_classes)
         )
