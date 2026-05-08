@@ -2,6 +2,28 @@ import torch
 import torch.nn as nn
 
 
+class SEBlock(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+
+        self.pool = nn.AdaptiveAvgPool2d(1)
+
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // reduction, channels),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        batch_size, channels, _, _ = x.size()
+
+        weights = self.pool(x).view(batch_size, channels)
+        weights = self.fc(weights).view(batch_size, channels, 1, 1)
+
+        return x * weights
+
+
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
@@ -29,9 +51,10 @@ class ResidualBlock(nn.Module):
 
         self.bn2 = nn.BatchNorm2d(out_channels)
 
+        self.se = SEBlock(out_channels)
+
         self.shortcut = nn.Sequential()
 
-        # Match dimensions if the input and output sizes are different
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(
@@ -54,7 +77,8 @@ class ResidualBlock(nn.Module):
         out = self.conv2(out)
         out = self.bn2(out)
 
-        # Residual connection
+        out = self.se(out)
+
         out = out + identity
         out = self.relu(out)
 
@@ -85,7 +109,6 @@ class PetResidualCNN(nn.Module):
             padding=1
         )
 
-        # Four residual stages
         self.layer1 = self._make_layer(64, 2, stride=1)
         self.layer2 = self._make_layer(128, 2, stride=2)
         self.layer3 = self._make_layer(256, 2, stride=2)
@@ -93,7 +116,6 @@ class PetResidualCNN(nn.Module):
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # Dropout before final classifier
         self.dropout = nn.Dropout(0.2)
         self.fc = nn.Linear(512, num_classes)
 
