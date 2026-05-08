@@ -6,6 +6,7 @@ from torchvision import datasets, transforms
 from model import PetResidualCNN
 
 
+# Use GPU if available
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 IMAGE_SIZE = 224
@@ -16,6 +17,7 @@ MODEL_PATH = "model.pth"
 def main():
     print("Using device:", DEVICE)
 
+    # Clean test preprocessing only
     test_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor(),
@@ -25,6 +27,7 @@ def main():
         ),
     ])
 
+    # Official Oxford-IIIT Pet test split
     test_dataset = datasets.OxfordIIITPet(
         root="data",
         split="test",
@@ -41,6 +44,7 @@ def main():
         pin_memory=True
     )
 
+    # Load model
     model = PetResidualCNN(num_classes=37).to(DEVICE)
 
     model.load_state_dict(
@@ -52,6 +56,7 @@ def main():
     correct = 0
     total = 0
 
+    # Evaluate without gradients
     with torch.no_grad():
         for images, labels in test_loader:
             images = images.to(DEVICE)
