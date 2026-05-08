@@ -2,28 +2,6 @@ import torch
 import torch.nn as nn
 
 
-class SEBlock(nn.Module):
-    def __init__(self, channels, reduction=16):
-        super().__init__()
-
-        self.pool = nn.AdaptiveAvgPool2d(1)
-
-        self.fc = nn.Sequential(
-            nn.Linear(channels, channels // reduction),
-            nn.ReLU(inplace=True),
-            nn.Linear(channels // reduction, channels),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        batch_size, channels, _, _ = x.size()
-
-        weights = self.pool(x).view(batch_size, channels)
-        weights = self.fc(weights).view(batch_size, channels, 1, 1)
-
-        return x * weights
-
-
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
@@ -51,8 +29,6 @@ class ResidualBlock(nn.Module):
 
         self.bn2 = nn.BatchNorm2d(out_channels)
 
-        self.se = SEBlock(out_channels)
-
         self.shortcut = nn.Sequential()
 
         if stride != 1 or in_channels != out_channels:
@@ -76,8 +52,6 @@ class ResidualBlock(nn.Module):
 
         out = self.conv2(out)
         out = self.bn2(out)
-
-        out = self.se(out)
 
         out = out + identity
         out = self.relu(out)

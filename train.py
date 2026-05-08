@@ -1,8 +1,15 @@
+import os
+import random
+import xml.etree.ElementTree as ET
+
+import numpy as np
+from PIL import Image
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import datasets, transforms
 
 from model import PetResidualCNN
@@ -10,13 +17,150 @@ from model import PetResidualCNN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+DATA_ROOT = "data"
 IMAGE_SIZE = 224
 BATCH_SIZE = 32
 EPOCHS = 30
 MODEL_PATH = "model.pth"
 
+CURRICULUM_END = 20
+MIN_CROP_PROB = 0.0
+
+MAX_TRIMAP_PROB = 0.6
+MIN_TRIMAP_PROB = 0.15
+
 torch.manual_seed(42)
 torch.cuda.manual_seed_all(42)
+random.seed(42)
+
+
+class OxfordPetROIDataset(Dataset):
+    def __init__(
+        self,
+        root,
+        split,
+        transform=None,
+        crop_prob=0.0,
+        trimap_prob=0.0,
+        margin=0.15
+    ):
+        self.root = root
+        self.split = split
+        self.transform = transform
+        self.crop_prob = crop_prob
+        self.trimap_prob = trimap_prob
+        self.margin = margin
+
+        self.base_dir = os.path.join(root, "oxford-iiit-pet")
+        self.images_dir = os.path.join(self.base_dir, "images")
+        self.xml_dir = os.path.join(self.base_dir, "annotations", "xmls")
+        self.trimap_dir = os.path.join(self.base_dir, "annotations", "trimaps")
+        self.split_file = os.path.join(self.base_dir, "annotations", f"{split}.txt")
+
+        self.samples = []
+
+        with open(self.split_file, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+
+                if len(parts) >= 2:
+                    image_name = parts[0]
+                    label = int(parts[1]) - 1
+                    self.samples.append((image_name, label))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def crop_to_roi(self, image, trimap, image_name):
+        xml_path = os.path.join(self.xml_dir, f"{image_name}.xml")
+
+        if not os.path.exists(xml_path):
+            return image, trimap
+
+        try:
+            root = ET.parse(xml_path).getroot()
+            box = root.find(".//bndbox")
+
+            if box is None:
+                return image, trimap
+
+            width, height = image.size
+
+            xmin = int(box.find("xmin").text)
+            ymin = int(box.find("ymin").text)
+            xmax = int(box.find("xmax").text)
+            ymax = int(box.find("ymax").text)
+
+            box_width = xmax - xmin
+            box_height = ymax - ymin
+
+            pad_x = int(box_width * self.margin)
+            pad_y = int(box_height * self.margin)
+
+            xmin = max(0, xmin - pad_x)
+            ymin = max(0, ymin - pad_y)
+            xmax = min(width, xmax + pad_x)
+            ymax = min(height, ymax + pad_y)
+
+            if xmax <= xmin or ymax <= ymin:
+                return image, trimap
+
+            image = image.crop((xmin, ymin, xmax, ymax))
+
+            if trimap is not None:
+                trimap = trimap.crop((xmin, ymin, xmax, ymax))
+
+            return image, trimap
+
+        except Exception:
+            return image, trimap
+
+    def apply_trimap_mask(self, image, trimap):
+        if trimap is None:
+            return image
+
+        image_np = np.array(image).astype(np.float32)
+        trimap_np = np.array(trimap)
+
+        mask = np.ones_like(trimap_np, dtype=np.float32) * 0.35
+
+        # Oxford trimap values:
+        # 1 = pet foreground, 2 = boundary, 3 = background
+        mask[trimap_np == 1] = 1.0
+        mask[trimap_np == 2] = 0.7
+        mask[trimap_np == 3] = 0.35
+
+        mask = np.expand_dims(mask, axis=2)
+
+        background_colour = np.ones_like(image_np) * 127.0
+
+        masked_image = image_np * mask + background_colour * (1.0 - mask)
+        masked_image = np.clip(masked_image, 0, 255).astype(np.uint8)
+
+        return Image.fromarray(masked_image)
+
+    def __getitem__(self, index):
+        image_name, label = self.samples[index]
+
+        image_path = os.path.join(self.images_dir, f"{image_name}.jpg")
+        trimap_path = os.path.join(self.trimap_dir, f"{image_name}.png")
+
+        image = Image.open(image_path).convert("RGB")
+
+        trimap = None
+        if os.path.exists(trimap_path):
+            trimap = Image.open(trimap_path)
+
+        if random.random() < self.crop_prob:
+            image, trimap = self.crop_to_roi(image, trimap, image_name)
+
+        if random.random() < self.trimap_prob:
+            image = self.apply_trimap_mask(image, trimap)
+
+        if self.transform is not None:
+            image = self.transform(image)
+
+        return image, label
 
 
 def calculate_accuracy(model, loader):
@@ -41,6 +185,13 @@ def calculate_accuracy(model, loader):
 
 def main():
     print("Using device:", DEVICE)
+
+    datasets.OxfordIIITPet(
+        root=DATA_ROOT,
+        split="trainval",
+        target_types="category",
+        download=True
+    )
 
     train_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE + 20, IMAGE_SIZE + 20)),
@@ -71,20 +222,20 @@ def main():
         ),
     ])
 
-    full_train_dataset = datasets.OxfordIIITPet(
-        root="data",
+    full_train_dataset = OxfordPetROIDataset(
+        root=DATA_ROOT,
         split="trainval",
-        target_types="category",
-        download=True,
-        transform=train_transform
+        transform=train_transform,
+        crop_prob=1.0,
+        trimap_prob=MAX_TRIMAP_PROB
     )
 
-    full_val_dataset = datasets.OxfordIIITPet(
-        root="data",
+    full_val_dataset = OxfordPetROIDataset(
+        root=DATA_ROOT,
         split="trainval",
-        target_types="category",
-        download=True,
-        transform=val_transform
+        transform=val_transform,
+        crop_prob=1.0,
+        trimap_prob=0.0
     )
 
     generator = torch.Generator().manual_seed(42)
@@ -138,6 +289,18 @@ def main():
     best_val_acc = 0.0
 
     for epoch in range(EPOCHS):
+        if epoch < CURRICULUM_END:
+            progress = epoch / (CURRICULUM_END - 1)
+
+            crop_prob = 1.0 - progress * (1.0 - MIN_CROP_PROB)
+            trimap_prob = MAX_TRIMAP_PROB - progress * (MAX_TRIMAP_PROB - MIN_TRIMAP_PROB)
+        else:
+            crop_prob = MIN_CROP_PROB
+            trimap_prob = MIN_TRIMAP_PROB
+
+        full_train_dataset.crop_prob = crop_prob
+        full_train_dataset.trimap_prob = trimap_prob
+
         model.train()
 
         running_loss = 0.0
@@ -170,6 +333,8 @@ def main():
 
         print(
             f"Epoch {epoch + 1}/{EPOCHS} | "
+            f"Crop Prob: {crop_prob:.2f} | "
+            f"Trimap Prob: {trimap_prob:.2f} | "
             f"Loss: {train_loss:.4f} | "
             f"Train Acc: {train_acc:.2f}% | "
             f"Val Acc: {val_acc:.2f}%"
