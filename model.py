@@ -2,10 +2,12 @@ import torch
 import torch.nn as nn
 
 
+# Basic residual block used inside the CNN
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
 
+        # First convolution layer
         self.conv1 = nn.Conv2d(
             in_channels,
             out_channels,
@@ -18,6 +20,7 @@ class ResidualBlock(nn.Module):
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
 
+        # Second convolution layer
         self.conv2 = nn.Conv2d(
             out_channels,
             out_channels,
@@ -29,8 +32,10 @@ class ResidualBlock(nn.Module):
 
         self.bn2 = nn.BatchNorm2d(out_channels)
 
+        # Shortcut path for the residual connection
         self.shortcut = nn.Sequential()
 
+        # Match dimensions if the input and output shapes are different
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(
@@ -44,8 +49,10 @@ class ResidualBlock(nn.Module):
             )
 
     def forward(self, x):
+        # Save shortcut connection
         identity = self.shortcut(x)
 
+        # Main convolution path
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
@@ -53,18 +60,21 @@ class ResidualBlock(nn.Module):
         out = self.conv2(out)
         out = self.bn2(out)
 
+        # Add shortcut to main path
         out = out + identity
         out = self.relu(out)
 
         return out
 
 
+# Main CNN model for Oxford-IIIT Pet classification
 class PetResidualCNN(nn.Module):
     def __init__(self, num_classes=37):
         super().__init__()
 
         self.in_channels = 64
 
+        # Initial convolution layer
         self.conv1 = nn.Conv2d(
             in_channels=3,
             out_channels=64,
@@ -77,25 +87,30 @@ class PetResidualCNN(nn.Module):
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
 
+        # Reduces spatial size of feature maps
         self.maxpool = nn.MaxPool2d(
             kernel_size=3,
             stride=2,
             padding=1
         )
 
+        # Four residual stages
         self.layer1 = self._make_layer(64, 2, stride=1)
         self.layer2 = self._make_layer(128, 2, stride=2)
         self.layer3 = self._make_layer(256, 2, stride=2)
         self.layer4 = self._make_layer(512, 2, stride=2)
 
+        # Converts feature maps into one value per channel
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
+        # Final classifier
         self.dropout = nn.Dropout(0.2)
         self.fc = nn.Linear(512, num_classes)
 
     def _make_layer(self, out_channels, num_blocks, stride):
         layers = []
 
+        # First block can change size or channels
         layers.append(
             ResidualBlock(
                 in_channels=self.in_channels,
@@ -106,6 +121,7 @@ class PetResidualCNN(nn.Module):
 
         self.in_channels = out_channels
 
+        # Remaining blocks keep the same size
         for _ in range(1, num_blocks):
             layers.append(
                 ResidualBlock(
@@ -118,21 +134,24 @@ class PetResidualCNN(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        # Initial feature extraction
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
 
         x = self.maxpool(x)
 
+        # Residual feature stages
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
 
+        # Pool and flatten features
         x = self.avgpool(x)
-
         x = torch.flatten(x, 1)
 
+        # Class prediction
         x = self.dropout(x)
         x = self.fc(x)
 

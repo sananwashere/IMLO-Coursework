@@ -9,31 +9,37 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 
 from model import PetResidualCNN
 
 
+# Use GPU
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# General Settings
 DATA_ROOT = "data"
 IMAGE_SIZE = 224
 BATCH_SIZE = 32
 EPOCHS = 30
 MODEL_PATH = "model.pth"
 
+# Curriculum learning settings
 CURRICULUM_END = 20
 MIN_CROP_PROB = 0.0
 
+# TRIMAP Probabilities
 MAX_TRIMAP_PROB = 0.6
-MIN_TRIMAP_PROB = 0.15
+MIN_TRIMAP_PROB = 0.0
 
+# Fixed seeds
 torch.manual_seed(42)
 torch.cuda.manual_seed_all(42)
 random.seed(42)
 
 
+# dataset that can use ROI boxes and trimaps during training
 class OxfordPetROIDataset(Dataset):
     def __init__(
         self,
@@ -59,6 +65,7 @@ class OxfordPetROIDataset(Dataset):
 
         self.samples = []
 
+        # Read image names and labels from split file
         with open(self.split_file, "r") as f:
             for line in f:
                 parts = line.strip().split()
@@ -72,6 +79,7 @@ class OxfordPetROIDataset(Dataset):
         return len(self.samples)
 
     def crop_to_roi(self, image, trimap, image_name):
+        # Use XML bounding box to crop the pet/head region
         xml_path = os.path.join(self.xml_dir, f"{image_name}.xml")
 
         if not os.path.exists(xml_path):
@@ -94,6 +102,7 @@ class OxfordPetROIDataset(Dataset):
             box_width = xmax - xmin
             box_height = ymax - ymin
 
+            # Add small margin around the box
             pad_x = int(box_width * self.margin)
             pad_y = int(box_height * self.margin)
 
@@ -107,6 +116,7 @@ class OxfordPetROIDataset(Dataset):
 
             image = image.crop((xmin, ymin, xmax, ymax))
 
+            # Crop trimap the same way if it exists
             if trimap is not None:
                 trimap = trimap.crop((xmin, ymin, xmax, ymax))
 
@@ -116,6 +126,7 @@ class OxfordPetROIDataset(Dataset):
             return image, trimap
 
     def apply_trimap_mask(self, image, trimap):
+        # Use trimap to fade the background during training
         if trimap is None:
             return image
 
@@ -124,7 +135,7 @@ class OxfordPetROIDataset(Dataset):
 
         mask = np.ones_like(trimap_np, dtype=np.float32) * 0.35
 
-        # Oxford trimap values:
+        # Oxford trimap values below
         # 1 = pet foreground, 2 = boundary, 3 = background
         mask[trimap_np == 1] = 1.0
         mask[trimap_np == 2] = 0.7
@@ -151,9 +162,11 @@ class OxfordPetROIDataset(Dataset):
         if os.path.exists(trimap_path):
             trimap = Image.open(trimap_path)
 
+        # Apply ROI crop depending on current crop probability
         if random.random() < self.crop_prob:
             image, trimap = self.crop_to_roi(image, trimap, image_name)
 
+        # Apply trimap mask depending on current trimap probability
         if random.random() < self.trimap_prob:
             image = self.apply_trimap_mask(image, trimap)
 
@@ -163,29 +176,10 @@ class OxfordPetROIDataset(Dataset):
         return image, label
 
 
-def calculate_accuracy(model, loader):
-    model.eval()
-
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for images, labels in loader:
-            images = images.to(DEVICE)
-            labels = labels.to(DEVICE)
-
-            outputs = model(images)
-            _, predicted = torch.max(outputs, 1)
-
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    return 100 * correct / total
-
-
 def main():
     print("Using device:", DEVICE)
 
+    # Download and check the dataset exists
     datasets.OxfordIIITPet(
         root=DATA_ROOT,
         split="trainval",
@@ -193,6 +187,7 @@ def main():
         download=True
     )
 
+    # Training augmentations
     train_transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE + 20, IMAGE_SIZE + 20)),
         transforms.RandomCrop(IMAGE_SIZE),
@@ -213,45 +208,14 @@ def main():
         transforms.RandomErasing(p=0.15),
     ])
 
-    val_transform = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
-        ),
-    ])
-
-    full_train_dataset = OxfordPetROIDataset(
+    # full trainval split for training
+    train_dataset = OxfordPetROIDataset(
         root=DATA_ROOT,
         split="trainval",
         transform=train_transform,
         crop_prob=1.0,
         trimap_prob=MAX_TRIMAP_PROB
     )
-
-    full_val_dataset = OxfordPetROIDataset(
-        root=DATA_ROOT,
-        split="trainval",
-        transform=val_transform,
-        crop_prob=1.0,
-        trimap_prob=0.0
-    )
-
-    generator = torch.Generator().manual_seed(42)
-
-    indices = torch.randperm(
-        len(full_train_dataset),
-        generator=generator
-    ).tolist()
-
-    train_size = int(0.8 * len(indices))
-
-    train_indices = indices[:train_size]
-    val_indices = indices[train_size:]
-
-    train_dataset = Subset(full_train_dataset, train_indices)
-    val_dataset = Subset(full_val_dataset, val_indices)
 
     train_loader = DataLoader(
         train_dataset,
@@ -261,34 +225,31 @@ def main():
         pin_memory=True
     )
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
+    print(f"Training images: {len(train_dataset)}")
 
+    # Create model
     model = PetResidualCNN(num_classes=37).to(DEVICE)
 
+    # Loss function
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    optimizer = optim.Adam(
+    # Optimiser
+    optimiser = optim.Adam(
         model.parameters(),
         lr=1e-3,
         weight_decay=1e-4
     )
 
+    # Learning rate scheduler
     scheduler = optim.lr_scheduler.OneCycleLR(
-        optimizer,
+        optimiser,
         max_lr=1e-3,
         epochs=EPOCHS,
         steps_per_epoch=len(train_loader)
     )
 
-    best_val_acc = 0.0
-
     for epoch in range(EPOCHS):
+        # Curriculum used to reduce ROI crop and trimap masking over time
         if epoch < CURRICULUM_END:
             progress = epoch / (CURRICULUM_END - 1)
 
@@ -298,8 +259,8 @@ def main():
             crop_prob = MIN_CROP_PROB
             trimap_prob = MIN_TRIMAP_PROB
 
-        full_train_dataset.crop_prob = crop_prob
-        full_train_dataset.trimap_prob = trimap_prob
+        train_dataset.crop_prob = crop_prob
+        train_dataset.trimap_prob = trimap_prob
 
         model.train()
 
@@ -311,13 +272,13 @@ def main():
             images = images.to(DEVICE)
             labels = labels.to(DEVICE)
 
-            optimizer.zero_grad()
+            optimiser.zero_grad()
 
             outputs = model(images)
             loss = criterion(outputs, labels)
 
             loss.backward()
-            optimizer.step()
+            optimiser.step()
             scheduler.step()
 
             running_loss += loss.item()
@@ -329,29 +290,23 @@ def main():
 
         train_loss = running_loss / len(train_loader)
         train_acc = 100 * correct / total
-        val_acc = calculate_accuracy(model, val_loader)
 
         print(
             f"Epoch {epoch + 1}/{EPOCHS} | "
             f"Crop Prob: {crop_prob:.2f} | "
             f"Trimap Prob: {trimap_prob:.2f} | "
             f"Loss: {train_loss:.4f} | "
-            f"Train Acc: {train_acc:.2f}% | "
-            f"Val Acc: {val_acc:.2f}%"
+            f"Train Acc: {train_acc:.2f}%"
         )
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-
-            torch.save(
-                model.state_dict(),
-                MODEL_PATH
-            )
-
-            print("Saved best model")
+    # Save final trained model
+    torch.save(
+        model.state_dict(),
+        MODEL_PATH
+    )
 
     print("Training complete")
-    print(f"Best Val Accuracy: {best_val_acc:.2f}%")
+    print("Saved final model")
 
 
 if __name__ == "__main__":
