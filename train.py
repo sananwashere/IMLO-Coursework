@@ -12,7 +12,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 
-from model import PetResidualCNN
+from model import PetCNN
 
 
 # Use GPU
@@ -228,7 +228,7 @@ def main():
     print(f"Training images: {len(train_dataset)}")
 
     # Create model
-    model = PetResidualCNN(num_classes=37).to(DEVICE)
+    model = PetCNN(num_classes=37).to(DEVICE)
 
     # Loss function
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)

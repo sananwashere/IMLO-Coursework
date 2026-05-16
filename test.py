@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from model import PetResidualCNN
+from model import PetCNN
 
 
 # Use GPU if available
@@ -45,7 +45,7 @@ def main():
     )
 
     # Load model
-    model = PetResidualCNN(num_classes=37).to(DEVICE)
+    model = PetCNN(num_classes=37).to(DEVICE)
 
     model.load_state_dict(
         torch.load(MODEL_PATH, map_location=DEVICE)
