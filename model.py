@@ -8,7 +8,7 @@ class PetCNN(nn.Module):
 
         self.features = nn.Sequential(
             # Block 1
-            nn.Conv2d(3, 32, 3, padding=1, bias=False),
+            nn.Conv2d(4, 32, 3, padding=1, bias=False),  # 4 channels: RGB + trimap
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
 
@@ -62,11 +62,14 @@ class PetCNN(nn.Module):
 
             nn.AdaptiveAvgPool2d((1, 1)),
         )
+
         self.classifier = nn.Sequential(
             nn.Flatten(),
+
             nn.Dropout(0.2),
             nn.Linear(512, 256),
             nn.ReLU(inplace=True),
+
             nn.Dropout(0.2),
             nn.Linear(256, num_classes)
         )
@@ -74,4 +77,5 @@ class PetCNN(nn.Module):
     def forward(self, x):
         x = self.features(x)
         x = self.classifier(x)
+
         return x
