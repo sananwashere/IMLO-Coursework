@@ -95,10 +95,13 @@ class OxfordPetTrimapDataset(Dataset):
 
             width, height = image.size
 
+
             xmin = int(box.find("xmin").text)
             ymin = int(box.find("ymin").text)
             xmax = int(box.find("xmax").text)
             ymax = int(box.find("ymax").text)
+
+
 
             box_width = xmax - xmin
             box_height = ymax - ymin
@@ -106,10 +109,14 @@ class OxfordPetTrimapDataset(Dataset):
             pad_x = int(box_width * self.margin)
             pad_y = int(box_height * self.margin)
 
+
+
             xmin = max(0, xmin - pad_x)
             ymin = max(0, ymin - pad_y)
             xmax = min(width, xmax + pad_x)
             ymax = min(height, ymax + pad_y)
+
+
 
             if xmax <= xmin or ymax <= ymin:
                 return image, trimap
@@ -121,6 +128,8 @@ class OxfordPetTrimapDataset(Dataset):
 
         except Exception:
             return image, trimap
+
+
 
     def trimap_to_mask(self, trimap):
         trimap_np = np.array(trimap, dtype=np.float32)
@@ -137,6 +146,8 @@ class OxfordPetTrimapDataset(Dataset):
 
         return mask_tensor
 
+
+
     def __getitem__(self, index):
         image_name, label = self.samples[index]
 
@@ -146,7 +157,7 @@ class OxfordPetTrimapDataset(Dataset):
         image = Image.open(image_path).convert("RGB")
         trimap = Image.open(trimap_path)
 
-        # ROI crop during training only, controlled by curriculum
+        # ROI crop during training, controlled by curriculum
         if random.random() < self.crop_prob:
             image, trimap = self.crop_to_roi(image, trimap, image_name)
 
@@ -191,7 +202,7 @@ class OxfordPetTrimapDataset(Dataset):
                 interpolation=TF.InterpolationMode.NEAREST
             )
 
-        # Image-only colour augmentations
+        # Image only colour augmentations
         if self.augment:
             image = self.color_jitter(image)
 
@@ -222,7 +233,7 @@ class OxfordPetTrimapDataset(Dataset):
 def main():
     print("Using device:", DEVICE)
 
-    # Download/check dataset exists
+    # Download and check dataset exists
     datasets.OxfordIIITPet(
         root=DATA_ROOT,
         split="trainval",
@@ -279,6 +290,8 @@ def main():
         running_loss = 0.0
         correct = 0
         total = 0
+        model.train()
+
 
         for images, labels in train_loader:
             images = images.to(DEVICE)
@@ -293,6 +306,8 @@ def main():
             optimiser.step()
             scheduler.step()
 
+
+
             running_loss += loss.item()
 
             _, predicted = torch.max(outputs, 1)
@@ -303,8 +318,11 @@ def main():
         train_loss = running_loss / len(train_loader)
         train_acc = 100 * correct / total
 
+        current_lr = optimiser.param_groups[0]["lr"]
+
         print(
             f"Epoch {epoch + 1}/{EPOCHS} | "
+            f"LR: {current_lr:.8f} | "
             f"Crop Prob: {crop_prob:.2f} | "
             f"Loss: {train_loss:.4f} | "
             f"Train Acc: {train_acc:.2f}%"
@@ -312,8 +330,7 @@ def main():
 
     torch.save(
         model.state_dict(),
-        MODEL_PATH
-    )
+        MODEL_PATH)
 
     print("Training complete")
     print("Saved final model")

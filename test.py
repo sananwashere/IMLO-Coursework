@@ -68,7 +68,7 @@ class OxfordPetTrimapDataset(Dataset):
         image = Image.open(image_path).convert("RGB")
         trimap = Image.open(trimap_path)
 
-        # Deterministic resize only
+
         image = TF.resize(image, (IMAGE_SIZE, IMAGE_SIZE))
         trimap = TF.resize(
             trimap,
@@ -97,7 +97,7 @@ class OxfordPetTrimapDataset(Dataset):
 def main():
     print("Using device:", DEVICE)
 
-    # Download/check official test split exists
+    # Download and check official test split exists
     datasets.OxfordIIITPet(
         root=DATA_ROOT,
         split="test",
